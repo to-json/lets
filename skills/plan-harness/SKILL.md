@@ -321,7 +321,15 @@ Pick the 2-3 that are most relevant to the work that was done. Don't use all fou
 
 For each persona pass: note specific simplification opportunities with file paths and line numbers. Not vague "this could be cleaner" — concrete "this 40-line helper could be 12 lines if X" or "these two abstractions collapse into one now that Y is done."
 
-Present the findings to the user. Some may be worth acting on now, some may be noted for later cleanup, some may be fine as-is. The user decides. If they approve changes, make them (run tests again after), then proceed to teardown.
+### Confidence filtering
+
+Rate each finding 0-100. Only present findings at confidence ≥80 to the user. This matters because the simplify pass can easily generate a long list of marginal suggestions that waste the user's attention — the goal is to surface the 2-4 things that genuinely make the code better, not to demonstrate thoroughness.
+
+- **≥80**: Real simplification that reduces complexity, removes dead abstraction, or collapses unnecessary indirection. You've verified the change is safe.
+- **50-79**: Plausible improvement but you're not sure it's worth the churn, or it might break something subtle. Log these in the plan addendum for later consideration but don't present them.
+- **<50**: Stylistic preference or speculative. Discard.
+
+Present the high-confidence findings to the user. Some may be worth acting on now, some may be noted for later cleanup, some may be fine as-is. The user decides. If they approve changes, make them (run tests again after), then proceed to teardown.
 
 ---
 

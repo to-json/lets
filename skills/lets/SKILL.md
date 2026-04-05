@@ -25,8 +25,9 @@ Read enough to be a competent interviewer — not an exhaustive survey.
 2. Scan the plan directory for filenames. If any look related to the proposal, read their context sections.
 3. If the proposal names specific subsystems, read relevant source files or docs (especially project-level `CLAUDE.md`, cleanup tracking files, architecture docs). Stay focused — read what's relevant, not everything.
 4. Check for prior art: has this been attempted, deferred, or explicitly rejected? Look in sequence files, changelogs, and completed/archived plans.
+5. **If the proposal touches subsystems you don't yet understand**, spawn 1-2 `Explore` agents to trace the relevant code paths before interviewing. An interviewer who understands the code asks better questions than one who only read the plan directory. Scope these tightly — "trace how auth middleware flows from request to handler" not "explore the auth system." Skip this for proposals where you already have sufficient context from steps 1-4.
 
-Time budget: under 2 minutes. You're building context for the interview, not writing the plan yet.
+Time budget: under 2 minutes for steps 1-4. If step 5 is needed, let the explore agents run in parallel — proceed to the interview once they return, or begin the interview with what you know and fold in their findings as they arrive.
 
 ## Phase 2: Interview
 
@@ -46,7 +47,20 @@ The interview has one job: extract enough understanding to draft a plan the user
 
 **Interview style**: Direct questions, one or two at a time. Don't dump all questions at once. React to answers — follow up on surprising or ambiguous responses. If the user says something that contradicts what you found in the repo, surface it immediately.
 
-## Phase 3: Draft
+## Phase 3: Draft (or Choose)
+
+If the interview revealed a clear direction, draft the plan directly. But if it surfaced genuine uncertainty about approach — competing architectural strategies, unclear tradeoffs, "it depends" answers — present 2-3 alternatives first.
+
+### When to present alternatives
+
+This is a judgment call, not a rule. Signals that alternatives are warranted:
+- The user said "I'm not sure whether to X or Y"
+- The interview revealed a tradeoff the user hasn't weighed (e.g., "we could do this incrementally or as a rewrite — each has different risk profiles")
+- The codebase exploration found two viable integration points with different consequences
+
+When presenting alternatives, keep each to 3-5 lines: the approach, its key tradeoff, and what it optimizes for. Don't pad to three options if there are really only two. Ask the user to pick or blend, then draft.
+
+### Drafting
 
 Write a first draft of the plan. If the project has established plan conventions (consistent format across existing plans), match them. Otherwise use this structure:
 
