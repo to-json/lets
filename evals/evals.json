@@ -1,0 +1,23 @@
+{
+  "skill_name": "plan-harness",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "harness plans/PLAN-DESIGN-REVIEW.md",
+      "expected_output": "Should classify as Standard tier (single stack TS, 5-20 files, has order-of-operations). Should propose edit permissions for packages/shell/client/ files mentioned in the plan. Should select Lea Verou (CSS/UI domain) + Rich Hickey or Sandi Metz (skeptic). Should flag that bun run test baseline needs recording. Should produce a plan addendum and permission set.",
+      "files": ["plans/PLAN-DESIGN-REVIEW.md"]
+    },
+    {
+      "id": 2,
+      "prompt": "harness plans/PLAN-SCHEMA-REMEDIATION.md",
+      "expected_output": "Should classify as Standard tier (single stack Rust, 5-20 files, has order-of-operations and risks section). Should propose edit permissions for server-rs/lantern-auth/ and server-rs/lantern-core/ files. Should select Simon Willison (SQLite domain) + Rich Hickey (skeptic). Should flag the risk about PRAGMA foreign_keys surfacing orphaned rows. Should flag that cargo test baseline needs recording.",
+      "files": ["plans/PLAN-SCHEMA-REMEDIATION.md"]
+    },
+    {
+      "id": 3,
+      "prompt": "harness plans/PLAN-GHOST-ENTERPRISE.md",
+      "expected_output": "Should classify as Heavy tier (cross-stack Rust+TS, >20 files, multiple streams, involves deleting significant code). Should propose broad glob permissions for the streams. Should select 3-4 personas including domain expert and skeptic. Should flag test breakage risk from DQL client deletion and auth gutting. Should produce comprehensive test impact analysis.",
+      "files": ["plans/PLAN-GHOST-ENTERPRISE.md"]
+    }
+  ]
+}
