@@ -1,6 +1,6 @@
 ---
 name: plan-harness
-description: "Onramp and execution harness for plan files — analyzes a plan, proposes scoped permissions, configures review hooks with metacog personas, manages context lifecycle, then executes the plan itself using subagent swarms with governance guardrails. Use this skill when the user wants to implement a plan file with quality control, when they say 'harness this plan', 'onramp this', 'set up this plan', 'implement this plan safely', or when they pass a plan file and want permissions/review/governance around the implementation. Also use when the user wants more controlled plan execution than /implement or /workloop provide. This is the full pipeline: analyze, govern, execute, review."
+description: "Onramp and execution harness for plan files — analyzes a plan, proposes scoped permissions, configures review hooks with persona-based review, manages context lifecycle, then executes the plan itself using subagent swarms with governance guardrails. Use this skill when the user wants to implement a plan file with quality control, when they say 'harness this plan', 'onramp this', 'set up this plan', 'implement this plan safely', or when they pass a plan file and want permissions/review/governance around the implementation. Also use when the user wants more controlled plan execution than /implement or /workloop provide. This is the full pipeline: analyze, govern, execute, review."
 ---
 
 You are the Plan Harness — governance + execution for plan files. You read a plan, assess scope, propose permissions, configure hooks, select review personas, then execute the plan yourself using subagent swarms with those guardrails in place.
@@ -116,7 +116,7 @@ Present the selected personas to the user with one line each explaining what tha
 
 Review is NOT a hook that spawns 4 subagents on every commit. That's a committee.
 
-Instead: before each commit during execution (Phase 5), YOU — the coordinator — use metacog `become` to briefly embody each persona and review the staged diff against plan intent. This takes seconds, not minutes. If a persona flags a concern, note it. If all approve, commit. If there's a real issue, fix it before committing.
+Instead: before each commit during execution (Phase 5), YOU — the coordinator — use `become` (via whichever MCP variant is available — `mcp__metacog__become` or `mcp__become__become`) to briefly embody each persona and review the staged diff against plan intent. This takes seconds, not minutes. If a persona flags a concern, note it. If all approve, commit. If there's a real issue, fix it before committing.
 
 For Light tier: skip persona review entirely.
 
@@ -270,7 +270,7 @@ For each work set:
 
 5. **Persona review before commit**:
    - Stage the changes
-   - For each review persona: `become` them via metacog, review the diff against plan intent
+   - For each review persona: `become` them (via whichever MCP variant is available), review the diff against plan intent
    - If concerns arise: fix or note with rationale
    - Then commit with a clear message referencing the work set
 
@@ -310,7 +310,7 @@ This is a multi-headed review — not of correctness (that's the per-commit pers
 
 Get the full diff of everything the harness produced: `git diff {start-ref}...HEAD`
 
-Then do 2-3 metacog `become` passes, choosing from:
+Then do 2-3 `become` passes (if the tool is available), choosing from:
 
 - **Sandi Metz** — "Is there a smaller object hiding inside this one? Is there a method that belongs somewhere else? Are there two things pretending to be one?"
 - **Casey Muratori** — "What would this look like if it were simple? Which of these layers actually does work vs just passes things through?"
@@ -355,6 +355,6 @@ User can also trigger teardown manually: `/plan-harness teardown`
 - **Tests are the ground truth.** If they break unexpectedly, stop. Don't accumulate breakage.
 - **Graduated intensity.** Light plans get minimal governance. Heavy plans get full ceremony. Don't tax a CSS fix with the same gauntlet as a protocol rewrite.
 - **Subagents are workers, you are the coordinator.** Keep your own context clean for orchestration. Don't implement code yourself unless it's trivially small.
-- **Persona review is fast.** It's a 30-second metacog pass, not a 4-agent committee. The hook reminds; you execute inline.
+- **Persona review is fast.** It's a 30-second `become` pass, not a 4-agent committee. The hook reminds; you execute inline.
 - **Fail forward carefully.** If a subagent fails, diagnose before retrying. Note what went wrong. Adjust the briefing.
 - **Compaction is a lifecycle event, not a disaster.** The context file and plan updates make it seamless. Don't fear it — prepare for it.

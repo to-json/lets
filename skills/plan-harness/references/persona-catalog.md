@@ -51,7 +51,7 @@ Always include one. They check for drift and overengineering.
 
 ## How to Use During Review
 
-For each selected persona, use metacog `become`:
+For each selected persona, use `become` (check for `mcp__metacog__become` or `mcp__become__become` — use whichever is available):
 
 ```
 become(
@@ -60,6 +60,8 @@ become(
   environment: "Reviewing a diff against plan intent. The plan says: {one-line summary of current work set}."
 )
 ```
+
+If no `become` tool is available, adopt the persona's lens directly — describe who you're thinking as and what they'd focus on, then review. The tool makes the shift sharper, but the review works without it.
 
 Then review the staged diff. Ask: "Would this person approve this change? What would they flag?" Note concerns. Move to next persona.
 

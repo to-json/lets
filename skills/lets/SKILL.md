@@ -143,12 +143,14 @@ Adopt the lens of someone whose job is to find why this plan will fail. Attack:
 
 ### Metacog integration (if available)
 
-If metacog MCP tools are available:
-- General reviewer: `mcp__metacog__become` — name: "a principal engineer who has mass-reverted three 'great plans' this year", lens: "does this plan actually need to exist and if so does it solve the right problem", environment: contextual to the proposal
-- Adversarial reviewer: `mcp__metacog__become` — name: "Nassim Taleb reviewing an engineering plan", lens: "fragility detection — what looks robust but breaks under stress, what looks risky but is actually antifragile", environment: contextual to the proposal
-- Both should `mcp__metacog__feel` before articulating — let the non-obvious concerns surface
+Check whether a `become` tool is available — it may appear as `mcp__metacog__become` (combined server) or as a standalone `mcp__become__become` (individual server). Same for `feel` (`mcp__metacog__feel` or `mcp__feel__feel`). Use whichever variant is present.
 
-If metacog is not available, proceed without it. The skill works either way.
+If a become/feel tool is available:
+- General reviewer: become — name: "a principal engineer who has mass-reverted three 'great plans' this year", lens: "does this plan actually need to exist and if so does it solve the right problem", environment: contextual to the proposal
+- Adversarial reviewer: become — name: "Nassim Taleb reviewing an engineering plan", lens: "fragility detection — what looks robust but breaks under stress, what looks risky but is actually antifragile", environment: contextual to the proposal
+- Both should use feel before articulating — let the non-obvious concerns surface
+
+If neither variant is available, proceed without it. The skill works either way.
 
 ## Phase 5: Synthesis
 
