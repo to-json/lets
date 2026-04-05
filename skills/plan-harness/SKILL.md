@@ -16,15 +16,15 @@ You do NOT hand off to /implement or /workloop. You are the coordinator.
 Read the plan file. Classify into one of three tiers:
 
 **Light** — Single-language, <5 files, no API/schema changes, no cross-boundary work.
-Examples: CSS fixes, single-module Rust refactors, adding a test file.
+Examples: CSS fixes, single-module refactors, adding a test file.
 Governance: permission set only. No review hook. No personas.
 
-**Standard** — Single stack (Rust OR TypeScript), 5-20 files, may touch APIs or schemas, has an order-of-operations section.
+**Standard** — Single stack, 5-20 files, may touch APIs or schemas, has an order-of-operations section.
 Examples: new HTTP endpoint + handler, UI feature with new components, database migration.
 Governance: permission set + 2-persona review + plan addendum.
 
-**Heavy** — Cross-stack (Rust AND TypeScript), >20 files, touches contracts between layers, has multiple streams or phases, or involves deleting/replacing significant code.
-Examples: multiplayer protocol changes, auth system rewrites, large codebase cleanups.
+**Heavy** — Cross-stack or cross-language, >20 files, touches contracts between layers, has multiple streams or phases, or involves deleting/replacing significant code.
+Examples: protocol changes, auth system rewrites, large codebase cleanups.
 Governance: permission set + 2-4 persona review + plan addendum + test impact analysis.
 
 Tell the user which tier and why. Adjust if they disagree.
@@ -47,11 +47,11 @@ Read the plan file and extract:
 ### 1b. Codebase Probe Agent
 For each file the plan mentions:
 - Does it exist? What's its current state?
-- What tests cover it? (grep for imports/references in test/ directory)
+- What tests cover it? (grep for imports/references in test directories)
 - Adjacent files the plan doesn't mention that will likely need changes
 
 ### 1c. Test Inventory Agent
-- Run `bun run test 2>&1 | tail -5` and `cd server-rs && cargo test 2>&1 | tail -10` to get current baseline
+- Discover the project's test commands from CLAUDE.md, package.json, Cargo.toml, Makefile, or similar. Run them to get current baseline counts.
 - Identify which test files exercise the code the plan touches
 - Record current pass counts as the baseline
 
@@ -74,13 +74,11 @@ Generate scoped permissions. Present to user for approval before applying.
 {
   "permissions": {
     "allow": [
-      "Edit(path/to/file.rs)",
-      "Edit(path/to/other.ts)",
-      "Write(path/to/new-file.ts)",
-      "Bash(cargo test*)",
-      "Bash(bun run test*)",
-      "Bash(bun run build*)",
-      "Bash(cd server-rs && cargo build*)"
+      "Edit(path/to/file.ext)",
+      "Edit(path/to/other.ext)",
+      "Write(path/to/new-file.ext)",
+      "Bash({project-specific test command})",
+      "Bash({project-specific build command})"
     ]
   }
 }
@@ -94,7 +92,7 @@ Rules:
 - **Never auto-allow** `git push`, `git reset`, `rm -rf`, writes to `.env`/`.claude/settings*`
 - **Glob patterns** when the plan touches a directory
 
-All harness workspace output goes under `plan-harness-workspace/{plan-slug}/` where `{plan-slug}` is derived from the plan filename (e.g., `PLAN-GHOST-ENTERPRISE.md` → `ghost-enterprise`). This keeps multiple plan runs cleanly separated.
+All harness workspace output goes under `plan-harness-workspace/{plan-slug}/` where `{plan-slug}` is derived from the plan filename (e.g., `PLAN-CACHE-LAYER.md` → `cache-layer`). This keeps multiple plan runs cleanly separated.
 
 Apply by merging into `.claude/settings.local.json`. Tag entries so teardown can find them.
 
@@ -108,7 +106,7 @@ For **Standard** and **Heavy** tiers, select review personas.
 
 Read `references/persona-catalog.md` for the full catalog. Principles:
 
-- **Domain expert**: someone whose documented work is directly relevant to what the plan builds. Martin Kleppmann for CRDTs, Lea Verou for CSS, Andrew Gallant for Rust tooling, Rich Harris for reactive UI.
+- **Domain expert**: someone whose documented work is directly relevant to what the plan builds. Match the persona to the domain — distributed systems, UI, database, CLI tooling, etc.
 - **Architectural skeptic**: checks for overengineering and drift from intent. Rich Hickey, Casey Muratori, Sandi Metz.
 - For Heavy tier, optionally add: **systems thinker** (Leslie Lamport, Bryan Cantrill) and/or **user advocate** (Don Norman, Bret Victor).
 
@@ -195,8 +193,7 @@ Write `plan-harness-workspace/{plan-slug}/context.md` before execution begins. U
 {summary of what's allowed}
 
 ## Test Baseline
-- TS: {N} passing across {M} files
-- Rust: {N} passing
+{test suite → pass count, for each suite in the project}
 
 ## Work Sets
 {numbered list with completion status}
@@ -226,7 +223,7 @@ Write `{plan-file}-harness.md` as a sibling to the plan file:
 ## Test Discipline
 - MUST stay green: {list}
 - MAY break (acknowledged in plan): {list}
-- Run after every work set: `bun run test` + `cd server-rs && cargo test`
+- Run after every work set: {project test commands}
 
 ## Escape Hatch
 If the plan no longer matches reality, STOP. Update the plan file with
@@ -258,7 +255,7 @@ For each work set:
 
 2. **Choose the right agent type**:
    - `general-purpose` for implementation
-   - `rust-expert` for complex Rust work (unsafe, async, lifetimes)
+   - Language-specific expert agents if available (e.g., `rust-expert` for complex Rust)
    - `feature-dev:code-architect` for design decisions within a set
    - `Explore` for investigation before implementing
    - Use worktree isolation (`isolation: "worktree"`) for risky changes
@@ -267,7 +264,7 @@ For each work set:
 
 4. **Verify each agent's work**:
    - Read key changed files
-   - Run the relevant test suite (`bun run test` for TS, `cd server-rs && cargo test` for Rust)
+   - Run the relevant test suites
    - If tests fail: diagnose, fix (or re-dispatch), don't move on with broken tests
    - Mark task completed only when tests pass
 
@@ -297,8 +294,7 @@ The PreCompact hook enforces this if you miss the soft threshold.
 ### Test Checkpoints
 
 After each work set completes:
-- Run `bun run test` — compare pass count to baseline
-- Run `cd server-rs && cargo test` — compare pass count to baseline
+- Run the project's test suites — compare pass counts to baseline
 - If pass count dropped and the plan didn't acknowledge it: **stop and flag**
 - If pass count dropped and it was expected: note in plan addendum, continue
 
@@ -325,7 +321,7 @@ Pick the 2-3 that are most relevant to the work that was done. Don't use all fou
 
 For each persona pass: note specific simplification opportunities with file paths and line numbers. Not vague "this could be cleaner" — concrete "this 40-line helper could be 12 lines if X" or "these two abstractions collapse into one now that Y is done."
 
-Present the findings to the user. Some may be worth acting on now, some may go into CLEANUP-EVENTUALLY.md, some may be fine as-is. The user decides. If they approve changes, make them (run tests again after), then proceed to teardown.
+Present the findings to the user. Some may be worth acting on now, some may be noted for later cleanup, some may be fine as-is. The user decides. If they approve changes, make them (run tests again after), then proceed to teardown.
 
 ---
 

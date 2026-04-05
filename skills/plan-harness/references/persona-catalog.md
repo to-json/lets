@@ -8,7 +8,7 @@ Pick the one closest to what the plan is actually building.
 
 | Person | Lens | Select when plan involves |
 |---|---|---|
-| Martin Kleppmann | CRDT correctness, distributed data consistency | Automerge, multiplayer sync, conflict resolution |
+| Martin Kleppmann | CRDT correctness, distributed data consistency | Distributed systems, multiplayer sync, conflict resolution |
 | Lea Verou | CSS architecture, progressive enhancement | Styling, layout, responsive design, CSS-in-JS |
 | Rich Harris | Reactive UI, compiler-driven frameworks | Component systems, reactivity, state management |
 | Andrew Gallant | Rust CLI ergonomics, regex/text processing | Rust tooling, parsers, CLI UX |
