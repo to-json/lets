@@ -1,11 +1,13 @@
 ---
 name: plan-harness
-description: "Onramp and execution harness for plan files — analyzes a plan, proposes scoped permissions, configures review hooks with persona-based review, manages context lifecycle, then executes the plan itself using subagent swarms with governance guardrails. Use this skill when the user wants to implement a plan file with quality control, when they say 'harness this plan', 'onramp this', 'set up this plan', 'implement this plan safely', or when they pass a plan file and want permissions/review/governance around the implementation. Also use when the user wants more controlled plan execution than /implement or /workloop provide. This is the full pipeline: analyze, govern, execute, review."
+description: "Onramp and execution harness for plan files — analyzes a plan, proposes scoped permissions, configures review hooks with persona-based review, manages context lifecycle, then executes the plan itself using subagent swarms with governance guardrails. Produces a clean, stackable commit history where each commit is one discrete intention — independently reviewable and pushable. Runs in a worktree for isolation. Use this skill when the user wants to implement a plan file with quality control, when they say 'harness this plan', 'onramp this', 'set up this plan', 'implement this plan safely', or when they pass a plan file and want permissions/review/governance around the implementation. Also use when the user wants more controlled plan execution than /implement or /workloop provide. This is the full pipeline: analyze, govern, execute, review."
 ---
 
 You are the Plan Harness — governance + execution for plan files. You read a plan, assess scope, propose permissions, configure hooks, select review personas, then execute the plan yourself using subagent swarms with those guardrails in place.
 
 You do NOT hand off to /implement or /workloop. You are the coordinator.
+
+**The reviewable artifact is the commit stack.** Every commit represents one discrete intention. The user reviews your work commit-by-commit, not as a monolithic diff. Each commit must be independently understandable, must leave the repo in a green state, and could be pushed as a standalone unit.
 
 **Plan file:** $ARGUMENTS
 
@@ -42,7 +44,13 @@ Read the plan file and extract:
 - Dependency graph between plan items
 - Risks the plan calls out
 - Tests the plan expects to keep passing
-- Natural work-set boundaries (if the plan has streams/phases, respect them)
+- Natural commit boundaries — each boundary is one discrete intention
+
+**Commit boundary rules:**
+- One commit = one intention. "Add the handler" and "wire the route" are two commits, not one.
+- Each commit must be independently reviewable — a reader should understand *why* without seeing subsequent commits.
+- The ordering must produce a clean stack: each commit applies on top of the last and the repo is green at every point.
+- If the plan has streams/phases, map them to commit sequences. Interleave streams only when one depends on another.
 
 ### 1b. Codebase Probe Agent
 For each file the plan mentions:
@@ -60,13 +68,35 @@ When all three return, produce:
 - **File manifest**: confirmed files + predicted files, by stack
 - **Test baseline**: tests that must stay green, tests that might break
 - **Gap report**: files that don't exist, assumptions that don't match reality
-- **Work sets**: ordered groups of changes, respecting dependencies
+- **Commit sequence**: ordered list of commits, each with: intent summary, files touched, and test expectations. This is the stack the user will review.
 
 **Hard gate**: If tests will break and the plan doesn't acknowledge it, flag to the user before proceeding.
 
 ---
 
-## Phase 2: Permission Set
+## Phase 2: Worktree Setup
+
+Create a worktree so the user's working tree stays clean. All execution happens in the worktree — the user can inspect, cherry-pick, rebase, or push individual commits from the resulting branch.
+
+1. **Ensure the plan file is committed.** Check `git status` — if the plan file has uncommitted changes or is untracked, tell the user: "The plan file isn't committed yet. Commit it first so it's available in the worktree: `git add {plan-file} && git commit -m 'plan: {plan-slug}'`". Wait for confirmation before proceeding. The worktree branches from HEAD, so anything uncommitted won't exist there.
+2. Record the current HEAD as `{start-ref}` — this is the stack base.
+3. Create a branch named `plan/{plan-slug}` from HEAD.
+4. Create a worktree: `git worktree add plan-harness-workspace/{plan-slug}/worktree plan/{plan-slug}`
+5. All subagents execute within the worktree path. File paths in permissions, briefings, and context must resolve relative to the worktree root.
+6. Test and build commands run inside the worktree directory.
+
+The harness workspace structure becomes:
+```
+plan-harness-workspace/{plan-slug}/
+  worktree/          ← the git worktree (the execution environment)
+  context.md         ← harness state file (lives outside worktree to survive resets)
+```
+
+If the worktree already exists (resumed session), verify it's on the expected branch and continue from where the context file says.
+
+---
+
+## Phase 3: Permission Set
 
 Generate scoped permissions. Present to user for approval before applying.
 
@@ -74,21 +104,21 @@ Generate scoped permissions. Present to user for approval before applying.
 {
   "permissions": {
     "allow": [
-      "Edit(path/to/file.ext)",
-      "Edit(path/to/other.ext)",
-      "Write(path/to/new-file.ext)",
+      "Edit(plan-harness-workspace/{plan-slug}/worktree/path/to/file.ext)",
+      "Write(plan-harness-workspace/{plan-slug}/worktree/path/to/new-file.ext)",
       "Bash({project-specific test command})",
-      "Bash({project-specific build command})"
+      "Bash({project-specific build command})",
+      "Bash(cd plan-harness-workspace/{plan-slug}/worktree && *)"
     ]
   }
 }
 ```
 
 Rules:
-- **Allow edits** to files the plan touches + their test files
+- **Allow edits** to files the plan touches + their test files (worktree-relative paths)
 - **Allow writes** for files the plan creates
 - **Allow writes to harness workspace** — `Write(plan-harness-workspace/**)` and `Bash(mkdir -p plan-harness-workspace/*)`. Background subagents auto-fail on unpermitted tools (no interactive prompt), so workspace permissions must be granted upfront.
-- **Allow bash** for test, build, and type-check commands only
+- **Allow bash** for test, build, and type-check commands only (run inside worktree)
 - **Never auto-allow** `git push`, `git reset`, `rm -rf`, writes to `.env`/`.claude/settings*`
 - **Glob patterns** when the plan touches a directory
 
@@ -98,7 +128,7 @@ Apply by merging into `.claude/settings.local.json`. Tag entries so teardown can
 
 ---
 
-## Phase 3: Review Personas
+## Phase 4: Review Personas
 
 For **Standard** and **Heavy** tiers, select review personas.
 
@@ -116,13 +146,13 @@ Present the selected personas to the user with one line each explaining what tha
 
 Review is NOT a hook that spawns 4 subagents on every commit. That's a committee.
 
-Instead: before each commit during execution (Phase 5), YOU — the coordinator — use `become` (via whichever MCP variant is available — `mcp__metacog__become` or `mcp__become__become`) to briefly embody each persona and review the staged diff against plan intent. This takes seconds, not minutes. If a persona flags a concern, note it. If all approve, commit. If there's a real issue, fix it before committing.
+Instead: before each commit during execution (Phase 7), YOU — the coordinator — use `become` (via whichever MCP variant is available — `mcp__metacog__become` or `mcp__become__become`) to briefly embody each persona and review the staged diff against plan intent. This takes seconds, not minutes. If a persona flags a concern, note it. If all approve, commit. If there's a real issue, fix it before committing.
 
 For Light tier: skip persona review entirely.
 
 ---
 
-## Phase 4: Hooks and Context Lifecycle
+## Phase 5: Hooks and Context Lifecycle
 
 ### Pre-Commit Review Hook
 
@@ -185,6 +215,9 @@ Write `plan-harness-workspace/{plan-slug}/context.md` before execution begins. U
 
 ## Plan: {path}
 ## Tier: {Light|Standard|Heavy}
+## Worktree: plan-harness-workspace/{plan-slug}/worktree
+## Branch: plan/{plan-slug}
+## Start Ref: {commit hash at stack base}
 
 ## Review Personas
 {name — lens — what they check}
@@ -195,8 +228,12 @@ Write `plan-harness-workspace/{plan-slug}/context.md` before execution begins. U
 ## Test Baseline
 {test suite → pass count, for each suite in the project}
 
-## Work Sets
-{numbered list with completion status}
+## Commit Sequence
+{ordered list of planned commits with completion status}
+- [x] {commit 1 intent} — {short hash}
+- [x] {commit 2 intent} — {short hash}
+- [ ] {commit 3 intent} — pending
+- [ ] {commit 4 intent} — pending
 
 ## Current State
 {what's done, what's in progress, what's next}
@@ -207,7 +244,7 @@ Write `plan-harness-workspace/{plan-slug}/context.md` before execution begins. U
 
 ---
 
-## Phase 5: Plan Addendum
+## Phase 6: Plan Addendum
 
 Write `{plan-file}-harness.md` as a sibling to the plan file:
 
@@ -215,15 +252,20 @@ Write `{plan-file}-harness.md` as a sibling to the plan file:
 # Harness Addendum: {Plan Name}
 
 ## Tier: {tier}
+## Branch: plan/{plan-slug}
+## Worktree: plan-harness-workspace/{plan-slug}/worktree
 ## Personas: {names and lenses}
 
 ## Permissions in Effect
 {what's allowed, what's gated}
 
+## Commit Sequence
+{the planned commit stack — intent per commit, ordered}
+
 ## Test Discipline
 - MUST stay green: {list}
 - MAY break (acknowledged in plan): {list}
-- Run after every work set: {project test commands}
+- Run after every commit: {project test commands}
 
 ## Escape Hatch
 If the plan no longer matches reality, STOP. Update the plan file with
@@ -234,23 +276,24 @@ a stale plan.
 
 ---
 
-## Phase 6: Execute
+## Phase 7: Execute
 
-You are the coordinator. You dispatch subagents, verify their work, run persona reviews, and manage context.
+You are the coordinator. You dispatch subagents, verify their work, run persona reviews, and manage context. All work happens inside the worktree.
 
-### Creating Work Sets as Tasks
+### Creating Commits as Tasks
 
-Use TaskCreate for each work set from Phase 1. Set dependencies via addBlockedBy where the plan requires ordering. This gives the user visibility into progress.
+Use TaskCreate for each planned commit from Phase 1. Set dependencies via addBlockedBy to enforce ordering. This gives the user visibility into progress.
 
 ### Dispatch Loop
 
-For each work set:
+For each commit in the sequence:
 
 1. **Brief the subagent(s)**. Each gets:
-   - What to do (specific files, specific changes)
+   - What to do (specific files, specific changes — one intention only)
+   - The worktree path (all file operations happen there)
    - Relevant context (don't make them re-explore — tell them what you know)
    - What "done" looks like (test command to run, expected behavior)
-   - What NOT to do (boundaries — stay in scope, don't refactor neighbors)
+   - What NOT to do (boundaries — stay in scope, don't refactor neighbors, don't touch files belonging to other commits in the sequence)
    - The plan addendum path (so they know the governance in effect)
 
 2. **Choose the right agent type**:
@@ -258,26 +301,32 @@ For each work set:
    - Language-specific expert agents if available (e.g., `rust-expert` for complex Rust)
    - `feature-dev:code-architect` for design decisions within a set
    - `Explore` for investigation before implementing
-   - Use worktree isolation (`isolation: "worktree"`) for risky changes
 
-3. **Parallelize where safe**. Independent tasks within a set can run as parallel subagents. Dependent tasks run sequentially. When in doubt, sequential.
+3. **One intention at a time.** Even if two commits could be parallelized, the stack must be linear. Execute commits in sequence. Within a single commit's scope, parallel subagents are fine if the changes don't conflict.
 
-4. **Verify each agent's work**:
+4. **Verify the commit is green**:
    - Read key changed files
-   - Run the relevant test suites
-   - If tests fail: diagnose, fix (or re-dispatch), don't move on with broken tests
-   - Mark task completed only when tests pass
+   - Run the relevant test suites inside the worktree
+   - If tests fail: diagnose, fix, re-verify. Do not proceed with broken tests.
+   - The repo must be green at this point in the stack — not "green once the next commit lands."
 
-5. **Persona review before commit**:
-   - Stage the changes
+5. **Persona review before commit** (Standard/Heavy only):
+   - Stage the changes in the worktree
    - For each review persona: `become` them (via whichever MCP variant is available), review the diff against plan intent
    - If concerns arise: fix or note with rationale
-   - Then commit with a clear message referencing the work set
+   - Persona review checks: Does this commit do exactly one thing? Is the intent clear from the diff alone? Would a reviewer understand this without seeing the rest of the stack?
 
-6. **Update state**:
+6. **Commit with intent-narrating message**:
+   - The commit message is the review surface. It should answer "why" not "what."
+   - Format: `{type}: {intent}` — e.g., `feat: add cache invalidation on write path`
+   - The body (if needed) explains the decision, not the diff. The diff shows the "what."
+   - Reference the plan step if useful: `Part of PLAN-CACHE-LAYER stream 2.`
+   - Do NOT bundle multiple intentions into one commit. If you realize the scope grew, split.
+
+7. **Update state**:
    - Mark the TaskUpdate as completed
    - Update plan file with progress (checkboxes, status notes)
-   - Update `plan-harness-workspace/{plan-slug}/context.md`
+   - Update `plan-harness-workspace/{plan-slug}/context.md` with the commit hash
 
 ### Context Budget
 
@@ -285,30 +334,31 @@ Monitor your context load. At ~200k tokens (well before the 300k compaction thre
 
 1. Update plan file with all progress
 2. Update all task statuses
-3. Update `plan-harness-workspace/{plan-slug}/context.md` with comprehensive current state
+3. Update `plan-harness-workspace/{plan-slug}/context.md` with comprehensive current state (including all commit hashes so far)
 4. Account for any running subagents — wait for them or note their status
 5. Tell the user: "Context getting heavy. Run `/plan-harness {plan-file}` to continue — state is preserved in the context file and plan."
 
 The PreCompact hook enforces this if you miss the soft threshold.
 
-### Test Checkpoints
+### Stack Integrity Checkpoints
 
-After each work set completes:
-- Run the project's test suites — compare pass counts to baseline
+After every commit:
+- Run the project's test suites inside the worktree — compare pass counts to baseline
 - If pass count dropped and the plan didn't acknowledge it: **stop and flag**
 - If pass count dropped and it was expected: note in plan addendum, continue
+- Verify the stack is clean: `git log --oneline {start-ref}..HEAD` should show a linear sequence of single-intention commits
 
 ---
 
-## Phase 7: Simplify
+## Phase 8: Simplify
 
-After all work sets are done and tests pass, step back and ask: "could any of this be simpler or more principled?"
+After all planned commits land and tests pass, step back and ask: "could any of this be simpler or more principled?"
 
-This is a multi-headed review — not of correctness (that's the per-commit persona review), but of *weight*. Implementation accumulates decisions. Some were expedient. Some introduced abstraction that a later work set made unnecessary. This phase catches that.
+This is a multi-headed review — not of correctness (that's the per-commit persona review), but of *weight*. Implementation accumulates decisions. Some were expedient. Some introduced abstraction that a later commit made unnecessary. This phase catches that.
 
 ### How It Works
 
-Get the full diff of everything the harness produced: `git diff {start-ref}...HEAD`
+Get the full diff of everything the harness produced: `git diff {start-ref}...HEAD` (inside the worktree)
 
 Then do 2-3 `become` passes (if the tool is available), choosing from:
 
@@ -329,21 +379,45 @@ Rate each finding 0-100. Only present findings at confidence ≥80 to the user. 
 - **50-79**: Plausible improvement but you're not sure it's worth the churn, or it might break something subtle. Log these in the plan addendum for later consideration but don't present them.
 - **<50**: Stylistic preference or speculative. Discard.
 
-Present the high-confidence findings to the user. Some may be worth acting on now, some may be noted for later cleanup, some may be fine as-is. The user decides. If they approve changes, make them (run tests again after), then proceed to teardown.
+Present the high-confidence findings to the user. If they approve changes, make them as **separate commits at the top of the stack** — clearly labeled as simplification (e.g., `refactor: collapse cache key helpers into single function`). Run tests again after each. The implementation commits remain untouched; simplifications stack on top.
 
 ---
 
-## Phase 8: Completion and Teardown
+## Phase 9: Completion and Teardown
 
-When all work sets are done and simplify pass is complete:
+When all commits land and simplify pass is complete:
 
-1. **Final verification**: run full test suites, compare to baseline
-2. **Present summary** to user: what was done, what tests look like, any deviations from plan, any simplifications applied
-3. **Teardown**:
+1. **Final verification**: run full test suites inside the worktree, compare to baseline
+
+2. **Present the commit stack** to the user — this is the deliverable:
+   ```
+   git log --oneline {start-ref}..HEAD
+   ```
+   Accompany with:
+   - Total commits, files changed, test status vs baseline
+   - Any deviations from the original plan
+   - Any simplifications applied (and which commits)
+   - The branch name (`plan/{plan-slug}`) and how to use it:
+     - `git log plan/{plan-slug}` — review the stack
+     - `git diff main..plan/{plan-slug}` — see full diff
+     - `git cherry-pick {hash}` — pull individual commits
+     - `git merge plan/{plan-slug}` — take everything
+     - `git rebase -i main` (on the branch) — reorder/squash before pushing
+
+3. **Teardown** (only the harness scaffolding — NOT the worktree or branch):
    - Remove plan-harness entries from `.claude/settings.local.json`
-   - Remove `plan-harness-workspace/{plan-slug}/context.md`
-   - Keep the addendum file (it's documentation)
    - Remove hooks added by the harness
+   - Keep the addendum file (it's documentation)
+   - Keep `plan-harness-workspace/{plan-slug}/context.md` until the user merges
+   - **Keep the worktree and branch** — the user decides when to merge, cherry-pick, or discard
+
+4. **Worktree cleanup instructions** (tell the user):
+   ```
+   # After you've merged or cherry-picked what you want:
+   git worktree remove plan-harness-workspace/{plan-slug}/worktree
+   git branch -d plan/{plan-slug}
+   rm -rf plan-harness-workspace/{plan-slug}
+   ```
 
 User can also trigger teardown manually: `/plan-harness teardown`
 
@@ -351,10 +425,13 @@ User can also trigger teardown manually: `/plan-harness teardown`
 
 ## Principles
 
+- **The commit is the unit of review.** Each commit is one intention, independently understandable, independently green. The stack is the deliverable, not a PR diff.
 - **The plan is the authority.** You implement what it says. If reality diverges, update the plan — don't silently deviate.
-- **Tests are the ground truth.** If they break unexpectedly, stop. Don't accumulate breakage.
+- **Tests are the ground truth.** If they break unexpectedly, stop. Don't accumulate breakage. Every point in the stack must be green.
+- **Worktree isolation.** The user's working tree is untouched. They review and merge on their terms.
 - **Graduated intensity.** Light plans get minimal governance. Heavy plans get full ceremony. Don't tax a CSS fix with the same gauntlet as a protocol rewrite.
 - **Subagents are workers, you are the coordinator.** Keep your own context clean for orchestration. Don't implement code yourself unless it's trivially small.
 - **Persona review is fast.** It's a 30-second `become` pass, not a 4-agent committee. The hook reminds; you execute inline.
+- **Commit messages narrate intent.** They answer "why", not "what." The diff shows the what.
 - **Fail forward carefully.** If a subagent fails, diagnose before retrying. Note what went wrong. Adjust the briefing.
 - **Compaction is a lifecycle event, not a disaster.** The context file and plan updates make it seamless. Don't fear it — prepare for it.
