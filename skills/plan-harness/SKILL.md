@@ -9,6 +9,8 @@ You do NOT hand off to /implement or /workloop. You are the coordinator.
 
 **The reviewable artifact is the commit stack.** Every commit represents one discrete intention. The user reviews your work commit-by-commit, not as a monolithic diff. Each commit must be independently understandable, must leave the repo in a green state, and could be pushed as a standalone unit.
 
+**Commits are batched at the end.** During execution, focus purely on implementation and verification — no committing. After all units are implemented and green, create the entire commit stack in one pass. This keeps the implementation flow uninterrupted while still producing clean, discrete commits.
+
 **Plan file:** $ARGUMENTS
 
 ---
@@ -146,7 +148,7 @@ Present the selected personas to the user with one line each explaining what tha
 
 Review is NOT a hook that spawns 4 subagents on every commit. That's a committee.
 
-Instead: before each commit during execution (Phase 7), YOU — the coordinator — use `become` (via whichever MCP variant is available — `mcp__metacog__become` or `mcp__become__become`) to briefly embody each persona and review the staged diff against plan intent. This takes seconds, not minutes. If a persona flags a concern, note it. If all approve, commit. If there's a real issue, fix it before committing.
+Instead: during the commit-batching phase (Phase 7b), before each commit, YOU — the coordinator — use `become` (via whichever MCP variant is available — `mcp__metacog__become` or `mcp__become__become`) to briefly embody each persona and review the staged diff against plan intent. This takes seconds, not minutes. If a persona flags a concern, note it and fix before committing. If all approve, commit and move to the next unit in the batch.
 
 For Light tier: skip persona review entirely.
 
@@ -156,7 +158,7 @@ For Light tier: skip persona review entirely.
 
 ### Pre-Commit Review Hook
 
-Register a hook that blocks `git commit` with a reminder to run persona review:
+Register a hook that blocks `git commit` during the implementation phase (Phase 7). This prevents accidental commits before the batch phase. The hook is removed at the start of Phase 7b (commit batching).
 
 ```json
 {
@@ -167,13 +169,15 @@ Register a hook that blocks `git commit` with a reminder to run persona review:
         "if": "starts_with(input.command, 'git commit')",
         "hooks": [{
           "type": "command",
-          "command": "echo '{\"decision\": \"block\", \"reason\": \"Plan Harness: run persona review on staged diff before committing.\"}'"
+          "command": "echo '{\"decision\": \"block\", \"reason\": \"Plan Harness: commits are batched at the end. Finish all implementation first, then enter Phase 7b to create the commit stack.\"}'"
         }]
       }
     ]
   }
 }
 ```
+
+**Remove this hook at the start of Phase 7b** so the commit-batching pass can create commits freely.
 
 ### PreCompact Safety Hook
 
@@ -228,15 +232,21 @@ Write `plan-harness-workspace/{plan-slug}/context.md` before execution begins. U
 ## Test Baseline
 {test suite → pass count, for each suite in the project}
 
-## Commit Sequence
-{ordered list of planned commits with completion status}
-- [x] {commit 1 intent} — {short hash}
-- [x] {commit 2 intent} — {short hash}
-- [ ] {commit 3 intent} — pending
-- [ ] {commit 4 intent} — pending
+## Unit Sequence
+{ordered list of planned units with implementation and commit status}
+- [x] impl [x] commit — {unit 1 intent} — {short hash}
+- [x] impl [x] commit — {unit 2 intent} — {short hash}
+- [x] impl [ ] commit — {unit 3 intent} — implemented, pending commit
+- [ ] impl [ ] commit — {unit 4 intent} — not started
+
+## Unit File Map
+{which files each unit touched — critical for commit batching}
+- unit 1: {file list}
+- unit 2: {file list}
 
 ## Current State
 {what's done, what's in progress, what's next}
+{phase: implementing | commit-batching | simplifying | complete}
 
 ## Decisions Made
 {anything decided during execution that a post-compaction self needs}
@@ -284,16 +294,16 @@ You are the coordinator. You dispatch subagents, verify their work, run persona 
 
 Use TaskCreate for each planned commit from Phase 1. Set dependencies via addBlockedBy to enforce ordering. This gives the user visibility into progress.
 
-### Dispatch Loop
+### Dispatch Loop — Implementation Only (No Commits)
 
-For each commit in the sequence:
+For each unit in the sequence:
 
 1. **Brief the subagent(s)**. Each gets:
    - What to do (specific files, specific changes — one intention only)
    - The worktree path (all file operations happen there)
    - Relevant context (don't make them re-explore — tell them what you know)
    - What "done" looks like (test command to run, expected behavior)
-   - What NOT to do (boundaries — stay in scope, don't refactor neighbors, don't touch files belonging to other commits in the sequence)
+   - What NOT to do (boundaries — stay in scope, don't refactor neighbors, don't touch files belonging to other units in the sequence)
    - The plan addendum path (so they know the governance in effect)
 
 2. **Choose the right agent type**:
@@ -302,31 +312,32 @@ For each commit in the sequence:
    - `feature-dev:code-architect` for design decisions within a set
    - `Explore` for investigation before implementing
 
-3. **One intention at a time.** Even if two commits could be parallelized, the stack must be linear. Execute commits in sequence. Within a single commit's scope, parallel subagents are fine if the changes don't conflict.
+3. **One intention at a time.** Execute units in sequence. Within a single unit's scope, parallel subagents are fine if the changes don't conflict.
 
-4. **Verify the commit is green**:
+4. **Verify the unit is green**:
    - Read key changed files
    - Run the relevant test suites inside the worktree
    - If tests fail: diagnose, fix, re-verify. Do not proceed with broken tests.
-   - The repo must be green at this point in the stack — not "green once the next commit lands."
+   - The repo must be green at this point — not "green once the next unit lands."
 
-5. **Persona review before commit** (Standard/Heavy only):
-   - Stage the changes in the worktree
-   - For each review persona: `become` them (via whichever MCP variant is available), review the diff against plan intent
-   - If concerns arise: fix or note with rationale
-   - Persona review checks: Does this commit do exactly one thing? Is the intent clear from the diff alone? Would a reviewer understand this without seeing the rest of the stack?
+5. **Do NOT commit.** Implementation stays in the working tree. Track which files were changed for this unit so they can be staged correctly during the commit-batching phase.
 
-6. **Commit with intent-narrating message**:
-   - The commit message is the review surface. It should answer "why" not "what."
-   - Format: `{type}: {intent}` — e.g., `feat: add cache invalidation on write path`
-   - The body (if needed) explains the decision, not the diff. The diff shows the "what."
-   - Reference the plan step if useful: `Part of PLAN-CACHE-LAYER stream 2.`
-   - Do NOT bundle multiple intentions into one commit. If you realize the scope grew, split.
-
-7. **Update state**:
+6. **Update state**:
    - Mark the TaskUpdate as completed
    - Update plan file with progress (checkboxes, status notes)
-   - Update `plan-harness-workspace/{plan-slug}/context.md` with the commit hash
+   - Update `plan-harness-workspace/{plan-slug}/context.md` — note which units are implemented and which files each unit touched
+
+### File-to-Unit Tracking
+
+Maintain a mapping of `unit → files changed` in the context file. This is critical for the commit-batching phase. If a file is touched by multiple units, note it — the batching phase will need to use `git add -p` or stage carefully.
+
+Example tracking in context.md:
+```markdown
+## Unit File Map
+- unit 1 (add cache struct): src/cache.rs (new), src/lib.rs
+- unit 2 (wire cache to handler): src/handler.rs, src/config.rs
+- unit 3 (add cache tests): tests/cache_test.rs (new)
+```
 
 ### Context Budget
 
@@ -340,13 +351,42 @@ Monitor your context load. At ~200k tokens (well before the 300k compaction thre
 
 The PreCompact hook enforces this if you miss the soft threshold.
 
-### Stack Integrity Checkpoints
+---
 
-After every commit:
-- Run the project's test suites inside the worktree — compare pass counts to baseline
+## Phase 7b: Commit Batching
+
+After ALL units are implemented and green, create the commit stack in one pass. This is where the working tree's accumulated changes become discrete, reviewable commits.
+
+### Procedure
+
+1. **Verify everything is green.** Run full test suites one final time before committing anything. All units are implemented — the repo should pass.
+
+2. **Stash the full working state.** `git stash --include-untracked` — this captures everything.
+
+3. **Replay commits in order.** For each unit in sequence:
+   a. Pop or apply the stash: `git stash pop` (or `git stash apply` if replaying from a saved state)
+   b. Stage ONLY the files belonging to this unit (using the file-to-unit map from the context file)
+   c. If a file is shared across units, use `git add -p` to stage only the hunks belonging to this unit. Brief a subagent to handle this if the boundaries are complex.
+   d. **Persona review** (Standard/Heavy only): Before committing, `become` each persona and review the staged diff. Does this commit do exactly one thing? Is the intent clear from the diff alone?
+   e. **Commit** with an intent-narrating message:
+      - Format: `{type}: {intent}` — e.g., `feat: add cache invalidation on write path`
+      - The body (if needed) explains the decision, not the diff.
+      - Reference the plan step if useful.
+   f. Re-stash the remaining changes: `git stash --include-untracked`
+   g. Verify tests still pass at this point in the stack (the repo must be green at every commit)
+
+4. **If file-to-unit boundaries are clean** (no shared files between units), a simpler flow works:
+   a. For each unit: `git add {unit-files}`, commit, verify green
+   b. No stash dance needed
+
+5. **Update context.md** with commit hashes as they're created.
+
+### Stack Integrity
+
+After the full stack is created:
+- `git log --oneline {start-ref}..HEAD` should show a linear sequence of single-intention commits
+- Run full test suites — compare pass counts to baseline
 - If pass count dropped and the plan didn't acknowledge it: **stop and flag**
-- If pass count dropped and it was expected: note in plan addendum, continue
-- Verify the stack is clean: `git log --oneline {start-ref}..HEAD` should show a linear sequence of single-intention commits
 
 ---
 
@@ -425,7 +465,7 @@ User can also trigger teardown manually: `/plan-harness teardown`
 
 ## Principles
 
-- **The commit is the unit of review.** Each commit is one intention, independently understandable, independently green. The stack is the deliverable, not a PR diff.
+- **The commit is the unit of review.** Each commit is one intention, independently understandable, independently green. The stack is the deliverable, not a PR diff. But commits are batched — implementation runs uninterrupted, then the commit stack is created in one pass at the end.
 - **The plan is the authority.** You implement what it says. If reality diverges, update the plan — don't silently deviate.
 - **Tests are the ground truth.** If they break unexpectedly, stop. Don't accumulate breakage. Every point in the stack must be green.
 - **Worktree isolation.** The user's working tree is untouched. They review and merge on their terms.
