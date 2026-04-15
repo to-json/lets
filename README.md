@@ -2,6 +2,8 @@
 
 Claude Code skills for structured planning and governed execution.
 
+These aren't really for you, unless I sent it to you personally.
+
 ## Skills
 
 ### `/plan`
